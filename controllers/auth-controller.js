@@ -2,6 +2,7 @@ const Student = require('../models/student-model');
 const User = require('../models/user-model');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
+const { sendAccountCreationEmail } = require('../utils/email-service');
 
 const maxAge = 3 * 24 * 60 * 60; // 3 days
 
@@ -115,31 +116,12 @@ const signin = async (req, res) => {
     }
 }
 
-// User Signup (Admin creates user)
 const signup = async (req, res) => {
     const { title, fname, lname, email, gender, birthday, phone, address, category } = req.body;
 
-    // For now, we generate a random password. 
-    // In legacy, it emails the reset link. 
-    // Here we'll just create the user and log it (Todo: implement email)
     const rawPassword = String(generateCode());
 
     try {
-        // Hashing handled by pre-save hook in user-model
-        // But legacy manually hashed it? 
-        // Legacy user-model had pre-save hook AND legacy controller manually hashed it?
-        // Legacy controller: "const hashedPassword = await bcrypt.hash(rawPassword, salt);"
-        // Legacy model: "this.password = await bcrypt.hash(this.password, salt);"
-        // If both do it, double hashing occurs only if passing plain text to model... 
-        // If controller hashes it, model receives hash. Model hashes the hash?
-        // If model checks `isModified`, then yes.
-        // I will trust the model's pre-save hook and pass raw password, OR follow legacy exact logic.
-        // Legacy controller passed `hashedPassword` to `User.create`.
-        // Legacy model hook: `userSchema.pre('save', ...)` hashes `this.password`.
-        // If we pass an already hashed password, the model will hash it AGAIN unless we disable hook or check format.
-        // Standard bcrypt strings start with $2b$.
-        // Let's rely on model hook and pass raw password.
-
         const user = await User.create({
             title, fname, lname, email, gender,
             birthday, phone, address, category,
@@ -147,11 +129,17 @@ const signup = async (req, res) => {
             status: true
         });
 
-        // TODO: Send Email (skipped for now as per migration plan focus on core logic)
-        console.log(`User created: ${email} / ${rawPassword}`);
+        // Generate Onboarding/Reset Link
+        const secret = process.env.USER_SECRET_KEY + user.password;
+        const payload = { email: user.email, id: user._id };
+        const token = jwt.sign(payload, secret, { expiresIn: '15m' });
+
+        const resetLink = `${process.env.FRONTEND_URL}/reset/user/${user._id}/${token}`;
+
+        await sendAccountCreationEmail(fname, email, resetLink, 'staff');
 
         res.status(201).json({
-            success: `User ${fname} added successfully.`
+            success: `Staff member ${fname} added successfully. Onboarding email sent.`
         });
 
     } catch (error) {
@@ -169,27 +157,24 @@ const addStudent = async (req, res) => {
     const adm = String(generateCode()); // Simple generation for now
 
     try {
-        // Same here, let model handle hashing if it has specific hook, or manually hash if Student model lacks it?
-        // Student model is simpler usually. Let's check if it has hook.
-        // Assuming it does (standard), or if not, I'll let it be. 
-        // Legacy `addStudent` manually hashed. 
-        // I'll stick to model hooking if possible or manual if needed. 
-        // For safety, I'll manually hash if unsure, but doubl-hashing is bad.
-        // I'll assume Student model logic mirrors User. 
-        // I'll pass raw for now.
-
-        // Note: Legacy addStudent used manual hash.
-        const salt = await bcrypt.genSalt(10);
-        const hashedPassword = await bcrypt.hash(rawPassword, salt);
-
         const student = await Student.create({
             adm, fname, mname, lname, email, gender,
             birthday, phone, address, category, course,
-            password: hashedPassword, trimester, index
+            password: rawPassword, // Model will hash this
+            trimester, index
         });
 
+        // Generate Onboarding/Reset Link
+        const secret = process.env.STUDENT_SECRET_KEY + student.password;
+        const payload = { email: student.email, id: student._id };
+        const token = jwt.sign(payload, secret, { expiresIn: '15m' });
+
+        const resetLink = `${process.env.FRONTEND_URL}/reset/student/${student._id}/${token}`;
+
+        await sendAccountCreationEmail(fname, email, resetLink, 'student');
+
         res.status(201).json({
-            success: `Student added. ADM: ${adm}`
+            success: `Student ${fname} added successfully. Onboarding email sent to ${email}`
         });
 
     } catch (error) {
@@ -206,4 +191,78 @@ const logout = (req, res) => {
     res.status(200).json({ success: 'Logged out' });
 }
 
-module.exports = { login, signin, signup, addStudent, logout };
+const resetUser = async (req, res) => {
+    const { id, token } = req.params;
+
+    try {
+        const user = await User.findById(id);
+        if (!user) return res.status(404).json({ error: 'User not found' });
+
+        const secret = process.env.USER_SECRET_KEY + user.password;
+        jwt.verify(token, secret);
+
+        res.status(200).json({ email: user.email });
+    } catch (error) {
+        res.status(400).json({ error: 'Invalid or expired token' });
+    }
+}
+
+const resetStudent = async (req, res) => {
+    const { id, token } = req.params;
+
+    try {
+        const student = await Student.findById(id);
+        if (!student) return res.status(404).json({ error: 'Student not found' });
+
+        const secret = process.env.STUDENT_SECRET_KEY + student.password;
+        jwt.verify(token, secret);
+
+        res.status(200).json({ email: student.email });
+    } catch (error) {
+        res.status(400).json({ error: 'Invalid or expired token' });
+    }
+}
+
+const resetUserPassword = async (req, res) => {
+    const { id, token } = req.params;
+    const { newPassword } = req.body;
+
+    try {
+        const user = await User.findById(id);
+        if (!user) return res.status(404).json({ error: 'User not found' });
+
+        const secret = process.env.USER_SECRET_KEY + user.password;
+        jwt.verify(token, secret);
+
+        // Update password (model hook will hash it)
+        user.password = newPassword;
+        await user.save();
+
+        res.status(200).json({ success: 'Password updated successfully' });
+    } catch (error) {
+        res.status(400).json({ error: 'Invalid or expired token' });
+    }
+}
+
+const resetStudentPassword = async (req, res) => {
+    const { id, token } = req.params;
+    const { newPassword } = req.body;
+
+    try {
+        const student = await Student.findById(id);
+        if (!student) return res.status(404).json({ error: 'Student not found' });
+
+        const secret = process.env.STUDENT_SECRET_KEY + student.password;
+        jwt.verify(token, secret);
+
+        // Update password (model hook will hash it)
+        student.password = newPassword;
+        await student.save();
+
+        res.status(200).json({ success: 'Password updated successfully' });
+    } catch (error) {
+        res.status(400).json({ error: 'Invalid or expired token' });
+    }
+}
+
+module.exports = { login, signin, signup, addStudent, logout, resetUser, resetStudent, resetUserPassword, resetStudentPassword };

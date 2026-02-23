@@ -76,11 +76,13 @@ const requireAuth = (req, res, next) => {
     const token = getToken(req);
 
     if (token) {
-        jwt.verify(token, process.env.USER_SECRET_KEY, (err, decodedToken) => {
+        jwt.verify(token, process.env.USER_SECRET_KEY, async (err, decodedToken) => {
             if (err) {
-                // If API request, return 401 instead of redirect
                 res.status(401).json({ err: 'Unauthorized: Invalid token' });
             } else {
+                const user = await User.findById(decodedToken.id);
+                if (!user) return res.status(401).json({ err: 'User no longer exists' });
+                req.user = user;
                 next();
             }
         });
@@ -94,10 +96,13 @@ const studentRequireAuth = (req, res, next) => {
     const token = getStudentToken(req);
 
     if (token) {
-        jwt.verify(token, process.env.STUDENT_SECRET_KEY, (err, decodedToken) => {
+        jwt.verify(token, process.env.STUDENT_SECRET_KEY, async (err, decodedToken) => {
             if (err) {
                 res.status(401).json({ err: 'Unauthorized: Invalid token' });
             } else {
+                const student = await Student.findById(decodedToken.id);
+                if (!student) return res.status(401).json({ err: 'Student no longer exists' });
+                req.student = student;
                 next();
             }
         });
@@ -130,6 +135,35 @@ const requireAnyAuth = (req, res, next) => {
             res.status(401).json({ err: 'Unauthorized: No token provided' });
         }
     }
+};
+
+const requireAnyUser = async (req, res, next) => {
+    const userToken = getToken(req);
+    const studentToken = getStudentToken(req);
+
+    if (userToken) {
+        try {
+            const decoded = jwt.verify(userToken, process.env.USER_SECRET_KEY);
+            const user = await User.findById(decoded.id);
+            if (user) {
+                req.user = user;
+                return next();
+            }
+        } catch (e) { }
+    }
+
+    if (studentToken) {
+        try {
+            const decoded = jwt.verify(studentToken, process.env.STUDENT_SECRET_KEY);
+            const student = await Student.findById(decoded.id);
+            if (student) {
+                req.user = student;
+                return next();
+            }
+        } catch (e) { }
+    }
+
+    res.status(401).json({ err: 'Unauthorized: Participation required' });
 };
 
 const checkAnyUser = async (req, res, next) => {
@@ -168,5 +202,6 @@ module.exports = {
     requireAuth,
     studentRequireAuth,
     requireAnyAuth,
+    requireAnyUser,
     checkAnyUser
 };

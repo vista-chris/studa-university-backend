@@ -73,11 +73,15 @@ const studentSchema = new Schema({
     },
 }, { timestamps: true });
 
-studentSchema.pre('save', async function (next) {
-    const salt = await bcrypt.genSalt();
-    this.password = await bcrypt.hash(this.password, salt);
+studentSchema.pre('save', async function () {
+    if (!this.isModified('password')) return;
 
-    next();
+    try {
+        const salt = await bcrypt.genSalt(10);
+        this.password = await bcrypt.hash(this.password, salt);
+    } catch (err) {
+        throw err;
+    }
 })
 
 //static login method

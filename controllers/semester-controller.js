@@ -1,6 +1,10 @@
 const mongoose = require('mongoose');
 const Semester = require('../models/semester-model');
-const { Structure, Academic, Accomodation } = require('../models/fee-model');
+const { Structure, Academic, Accommodation } = require('../models/fee-model');
+const Room = require('../models/room-model');
+const Allocation = require('../models/accommodation-allocation-model');
+const Student = require('../models/student-model');
+const Hostel = require('../models/hostel-model');
 
 // Register Semester
 const regSemester = async (req, res) => {
@@ -27,6 +31,42 @@ const regSemester = async (req, res) => {
         const structure = await Structure.findOne({ course, session });
         if (!structure) {
             return res.status(404).json({ err: 'No fee structure found for this course and session!' });
+        }
+
+        // Randomly assign a room if hostel is requested
+        let assignedRoom = null;
+        if (hostel) {
+            // Fetch student to check gender
+            const studentDetails = await Student.findById(student);
+            if (!studentDetails) {
+                return res.status(404).json({ err: 'Student not found!' });
+            }
+
+            const studentGender = studentDetails.gender; // Usually 'Male' or 'Female'
+
+            // Find hostels that match student gender
+            const matchingHostels = await Hostel.find({
+                gender: { $in: [studentGender, 'Mixed'] }
+            });
+
+            if (matchingHostels.length === 0) {
+                return res.status(400).json({ err: `No hostels available for ${studentGender} students!` });
+            }
+
+            const hostelIds = matchingHostels.map(h => h._id);
+
+            // Find available rooms in these hostels
+            const availableRooms = await Room.find({
+                hostel: { $in: hostelIds },
+                status: 'Available'
+            });
+
+            if (availableRooms.length === 0) {
+                return res.status(400).json({ err: 'No available hostel rooms for your gender at the moment!' });
+            }
+
+            // Pick a random room
+            assignedRoom = availableRooms[Math.floor(Math.random() * availableRooms.length)];
         }
 
         const newSemester = await Semester.create({
@@ -85,13 +125,29 @@ const regSemester = async (req, res) => {
             excess
         });
 
-        if (hostel) {
-            let hPayable = structure.accomodation;
+        if (hostel && assignedRoom) {
+            // Create Allocation
+            await Allocation.create({
+                student,
+                room: assignedRoom._id,
+                semester: newSemester._id,
+                status: 'Active'
+            });
+
+            // Update Room Occupancy
+            assignedRoom.occupancy += 1;
+            if (assignedRoom.occupancy >= assignedRoom.capacity) {
+                assignedRoom.status = 'Full';
+            }
+            await assignedRoom.save();
+
+            // Link room price to accommodation payable
+            let hPayable = assignedRoom.price;
             let hPaid = 0;
             let hBalance = hPayable;
             let hExcess = 0;
 
-            const accomodationStatements = await Accomodation.aggregate([
+            const accommodationStatements = await Accommodation.aggregate([
                 {
                     $lookup: {
                         from: 'semesters',
@@ -111,8 +167,8 @@ const regSemester = async (req, res) => {
                 { $limit: 1 }
             ]);
 
-            if (accomodationStatements.length > 0) {
-                const hExcessFee = accomodationStatements[0].excess;
+            if (accommodationStatements.length > 0) {
+                const hExcessFee = accommodationStatements[0].excess;
                 if (hExcessFee >= hPayable) {
                     hPaid = hPayable;
                     hBalance = 0;
@@ -124,7 +180,7 @@ const regSemester = async (req, res) => {
                 }
             }
 
-            await Accomodation.create({
+            await Accommodation.create({
                 semester: newSemester._id,
                 payable: hPayable,
                 paid: hPaid,

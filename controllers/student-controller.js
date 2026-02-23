@@ -11,7 +11,7 @@ const mongoose = require('mongoose');
 // Get all students
 module.exports.getAllStudents = async (req, res) => {
     try {
-        const students = await Student.find().select('-password').populate('course');
+        const students = await Student.find().select('-password').populate('course').sort({ createdAt: -1 });
         res.status(200).json(students);
     } catch (err) {
         res.status(500).json({ error: err.message });

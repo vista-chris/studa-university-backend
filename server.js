@@ -18,6 +18,9 @@ const fileManagerRoutes = require('./routes/file-manager-route');
 const timetableRoutes = require('./routes/timetable-route');
 const semesterRoutes = require('./routes/semester-route');
 const gradingRoutes = require('./routes/grading-route');
+const libraryRoutes = require('./routes/library-route');
+const academicAnalyticsRoutes = require('./routes/academic-analytics-route');
+const accommodationRoutes = require('./routes/accommodation-route');
 
 
 
@@ -50,6 +53,9 @@ app.use('/api/files', fileManagerRoutes);
 app.use('/api/timetable', timetableRoutes);
 app.use('/api/semesters', semesterRoutes);
 app.use('/api/grading', gradingRoutes);
+app.use('/api/library', libraryRoutes);
+app.use('/api/academic-analytics', academicAnalyticsRoutes);
+app.use('/api/accommodation', accommodationRoutes);
 
 
 

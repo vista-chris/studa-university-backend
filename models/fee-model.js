@@ -33,7 +33,7 @@ const structureSchema = new Schema({
     },
     accommodation: {
         type: Number,
-        required: true
+        default: 0
     }
 }, { timestamps: true });
 
@@ -65,7 +65,7 @@ const academicSchema = new Schema({
 
 const Academic = mongoose.model('academic', academicSchema);
 
-const accomodationSchema = new Schema({
+const accommodationSchema = new Schema({
     semester: {
         type: ObjectId,
         ref: 'semester',
@@ -89,6 +89,7 @@ const accomodationSchema = new Schema({
     }
 }, { timestamps: true });
 
-const Accomodation = mongoose.model('accomodation', accomodationSchema);
+// Keep collection name as 'accomodations' to avoid data loss (one 'm' as per pluralization)
+const Accommodation = mongoose.model('accommodation', accommodationSchema, 'accomodations');
 
-module.exports = { Structure, Academic, Accomodation };
+module.exports = { Structure, Academic, Accommodation };
